@@ -140,6 +140,21 @@ class KnowledgeItem {
       );
 }
 
+/// 胎动计数对照的口径:2 小时内 ≥ 6 次(与胎动页说明文字一致,改动需两处一起改)
+const fetalCountWindow = Duration(hours: 2);
+const fetalCountTarget = 6;
+
+enum FetalCountStatus {
+  /// 2 小时内已达 6 次
+  reached,
+
+  /// 判断不了:未满 2 小时就结束且不足 6 次,或超过 2 小时才数到 6 次、无法确认 2 小时内达标
+  undetermined,
+
+  /// 满 2 小时仍不足 6 次
+  attention,
+}
+
 /// 胎动计数会话(可写,落 SQLite 表 fetal_movement_sessions)。
 /// 一次「数胎动」即一条记录:开始/结束时间 + 这段时间内记录的胎动次数。
 class FetalMovementSession {
@@ -156,6 +171,15 @@ class FetalMovementSession {
   });
 
   Duration get duration => endTime.difference(startTime);
+
+  /// 按页面写明的口径「2 小时内 ≥ 6 次」归类。只记次数、不记每次的时刻,
+  /// 所以历时超过 2 小时的记录无法确认是否在 2 小时内达标;这只是对照口径,不是健康结论。
+  FetalCountStatus get status {
+    final enough = count >= fetalCountTarget;
+    if (enough && duration <= fetalCountWindow) return FetalCountStatus.reached;
+    if (!enough && duration >= fetalCountWindow) return FetalCountStatus.attention;
+    return FetalCountStatus.undetermined;
+  }
 
   Map<String, Object?> toMap() => {
         if (id != null) 'fm_id': id,

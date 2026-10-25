@@ -18,6 +18,7 @@ class _FetalMovementScreenState extends State<FetalMovementScreen> {
   DateTime? _start;
   int _count = 0;
   Timer? _ticker;
+  bool _saving = false;
 
   bool get _active => _start != null;
 
@@ -36,26 +37,56 @@ class _FetalMovementScreenState extends State<FetalMovementScreen> {
   }
 
   void _record() {
-    if (!_active) return;
+    if (!_active || _saving) return;
     setState(() => _count++);
   }
 
-  Future<void> _endSession() async {
+  void _clearSession() {
     _ticker?.cancel();
     _ticker = null;
-    final start = _start;
-    final count = _count;
     setState(() {
       _start = null;
       _count = 0;
+      _saving = false;
     });
-    if (start != null && count > 0) {
+  }
+
+  /// 零次也保存:一次完整观察里没数到胎动,恰恰是最需要留下的记录。
+  /// 先存后清,存失败时本次计数还在,可以再点一次。
+  Future<void> _endSession() async {
+    final start = _start;
+    if (start == null || _saving) return;
+    setState(() => _saving = true);
+    try {
       await context.read<AppState>().addFetalSession(FetalMovementSession(
             startTime: start,
             endTime: DateTime.now(),
-            count: count,
+            count: _count,
           ));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('保存失败,本次计数还在,请再点一次「结束并保存」')));
+      return;
     }
+    if (mounted) _clearSession();
+  }
+
+  /// 误点开始时用:明确放弃,不留记录
+  Future<void> _discardSession() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('放弃本次计数?'),
+        content: Text('本次已数 $_count 次,放弃后不会保存。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('继续计数')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('放弃')),
+        ],
+      ),
+    );
+    if (ok == true && mounted && !_saving) _clearSession();
   }
 
   @override
@@ -122,7 +153,7 @@ class _FetalMovementScreenState extends State<FetalMovementScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton(
-                      onPressed: _endSession,
+                      onPressed: _saving ? null : _endSession,
                       style: OutlinedButton.styleFrom(
                         foregroundColor: accent,
                         side: BorderSide(color: accent, width: 1.5),
@@ -133,6 +164,12 @@ class _FetalMovementScreenState extends State<FetalMovementScreen> {
                       child: const Text('结束并保存',
                           style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
                     ),
+                  ),
+                if (_active)
+                  TextButton(
+                    onPressed: _saving ? null : _discardSession,
+                    child: const Text('放弃本次(不保存)',
+                        style: TextStyle(fontSize: 13, color: AppColors.sub)),
                   ),
               ],
             ),
@@ -153,7 +190,16 @@ class _FetalMovementScreenState extends State<FetalMovementScreen> {
 
   Widget _historyTile(
       AppState app, FetalMovementSession s, Color accent, Color accentSoft) {
-    final normal = s.count >= 6 || s.duration.inMinutes < 60;
+    // 只对照「2 小时内 ≥ 6 次」这条口径,不替任何一次记录下「正常」结论
+    final (IconData icon, Color color, String note) = switch (s.status) {
+      FetalCountStatus.reached => (Icons.check_circle_outline, AppColors.good, '2 小时内已达 6 次'),
+      FetalCountStatus.attention => (Icons.info_outline, AppColors.bad, '满 2 小时不足 6 次,请留意,明显减少请就医'),
+      FetalCountStatus.undetermined => (
+          Icons.hourglass_empty,
+          AppColors.sub,
+          s.count >= fetalCountTarget ? '超过 2 小时,无法确认 2 小时内是否达 6 次' : '未满 2 小时,还不能按 2 小时 6 次对照'
+        ),
+    };
     return Dismissible(
       key: ValueKey('fm_${s.id}'),
       direction: DismissDirection.endToStart,
@@ -187,11 +233,12 @@ class _FetalMovementScreenState extends State<FetalMovementScreen> {
                   const SizedBox(height: 3),
                   Text('计数 ${s.count} 次 · 历时 ${_fmtDuration(s.duration)}',
                       style: const TextStyle(fontSize: 12, color: AppColors.sub)),
+                  const SizedBox(height: 2),
+                  Text(note, style: TextStyle(fontSize: 11, color: color)),
                 ],
               ),
             ),
-            Icon(normal ? Icons.check_circle_outline : Icons.info_outline,
-                size: 20, color: normal ? AppColors.good : AppColors.bad),
+            Icon(icon, size: 20, color: color),
           ],
         ),
       ),

@@ -36,6 +36,22 @@ void main() {
     expect(back.endTime, s.endTime);
   });
 
+  test('胎动记录只按「2 小时内 ≥ 6 次」对照,观察不足不算达标', () {
+    FetalCountStatus of(int minutes, int count) => FetalMovementSession(
+          startTime: DateTime(2026, 6, 5, 10, 0),
+          endTime: DateTime(2026, 6, 5, 10, 0).add(Duration(minutes: minutes)),
+          count: count,
+        ).status;
+    expect(of(40, 6), FetalCountStatus.reached);
+    expect(of(120, 6), FetalCountStatus.reached);
+    // 审查复现:59 分钟 1 次、180 分钟 6 次以前都显示绿色勾
+    expect(of(59, 1), FetalCountStatus.undetermined);
+    expect(of(180, 6), FetalCountStatus.undetermined);
+    expect(of(120, 5), FetalCountStatus.attention);
+    expect(of(150, 0), FetalCountStatus.attention);
+    expect(of(30, 0), FetalCountStatus.undetermined);
+  });
+
   test('ContractionRecord 计算时长并可序列化往返', () {
     final c = ContractionRecord(
       id: 1,
