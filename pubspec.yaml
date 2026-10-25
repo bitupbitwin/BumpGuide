@@ -1,7 +1,7 @@
 name: bumpjourney
 description: "孕育时光 · BumpJourney — 孕期周期全流程管理 App"
 publish_to: 'none'
-version: 0.1.0+1
+version: 0.1.1+2
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
